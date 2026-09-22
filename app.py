@@ -528,34 +528,100 @@ fig_sub.update_xaxes(tickmode="array", tickvals=ticks_tempo)
 st.plotly_chart(fig_sub, use_container_width=True)
 
 # -----------------------------
-# Comparacao no tempo selecionado
+# Comparacao temporal entre tratamentos
 # -----------------------------
 st.markdown("<div class='section-chip'>Comparacao</div>", unsafe_allow_html=True)
-st.subheader("4. Comparacao entre tratamentos")
-tempo_comparacao = st.select_slider(
-    "Tempo para comparacao",
-    options=sorted(filtrado["Tempo_h"].astype(int).unique()),
-    value=ultimo_tempo,
+st.subheader("4. Comparacao temporal entre tratamentos")
+
+metricas_comparacao = {
+    "Etanol": ("Etanol", "Etanol (% v/v)"),
+    "Glicose": ("Glicose", "Glicose (g/100 mL)"),
+    "Acucares totais": ("Acucares_totais", "Acucares totais (g/100 mL)"),
+    "Glicerol": ("Glicerol", "Glicerol (g/100 mL)"),
+}
+
+col_metrica, col_tempo = st.columns([1.25, 2])
+with col_metrica:
+    metrica_escolhida = st.selectbox(
+        "Variavel para comparacao",
+        options=list(metricas_comparacao.keys()),
+        index=0,
+        key="metrica_comparacao_temporal",
+    )
+
+with col_tempo:
+    tempo_comparacao = st.select_slider(
+        "Destacar tempo (h)",
+        options=sorted(filtrado["Tempo_h"].astype(int).unique()),
+        value=ultimo_tempo,
+        key="tempo_comparacao_temporal",
+    )
+
+coluna_metrica, titulo_y_comparacao = metricas_comparacao[metrica_escolhida]
+
+comp_temporal = (
+    filtrado
+    .groupby(["Grupo", "Tempo_h"], as_index=False)[coluna_metrica]
+    .mean()
 )
+comp_temporal["Tratamento"] = comp_temporal["Grupo"].astype(int).map(NOMES_GRUPOS)
 
-comp = filtrado[filtrado["Tempo_h"].astype(int) == int(tempo_comparacao)]
-comp_media = comp.groupby("Grupo", as_index=False)[["Etanol", "Glicose", "Acucares_totais", "Glicerol"]].mean()
-comp_media["Tratamento"] = comp_media["Grupo"].astype(int).map(NOMES_GRUPOS)
-
-fig_bar = px.bar(
-    comp_media,
-    x="Tratamento",
-    y="Etanol",
-    text_auto=".2f",
-    title=f"Etanol medio por tratamento em {tempo_comparacao} h",
-    labels={"Tratamento": "Tratamento", "Etanol": "Etanol (% v/v)"},
+fig_comp = px.line(
+    comp_temporal,
+    x="Tempo_h",
+    y=coluna_metrica,
     color="Tratamento",
+    markers=True,
+    title=f"{metrica_escolhida}: comparacao da evolucao entre tratamentos",
+    labels={
+        "Tempo_h": "Tempo de fermentacao (h)",
+        coluna_metrica: titulo_y_comparacao,
+        "Tratamento": "Tratamento",
+    },
     color_discrete_map=CORES_TRATAMENTOS,
     color_discrete_sequence=COLORWAY,
 )
-tema_figura(fig_bar, "Etanol (% v/v)", escala_ajustada=False, is_bar=True)
-fig_bar.update_yaxes(rangemode="tozero")
-st.plotly_chart(fig_bar, use_container_width=True)
+
+tema_figura(
+    fig_comp,
+    titulo_y_comparacao,
+    valores_y=comp_temporal[coluna_metrica],
+    escala_ajustada=escala_ajustada,
+)
+fig_comp.update_xaxes(
+    tickmode="array",
+    tickvals=sorted(comp_temporal["Tempo_h"].dropna().astype(int).unique().tolist()),
+)
+
+# Linha vertical para manter a leitura de um tempo de referencia sem perder a curva completa.
+fig_comp.add_vline(
+    x=int(tempo_comparacao),
+    line_width=1.5,
+    line_dash="dash",
+    line_color="rgba(255,255,255,0.65)",
+)
+fig_comp.add_annotation(
+    x=int(tempo_comparacao),
+    y=1.03,
+    yref="paper",
+    text=f"Referencia: {tempo_comparacao} h",
+    showarrow=False,
+    font=dict(color=TEXT, size=11),
+    bgcolor="rgba(20,20,24,0.85)",
+    bordercolor="rgba(255,255,255,0.12)",
+    borderwidth=1,
+    borderpad=5,
+)
+
+st.plotly_chart(fig_comp, use_container_width=True)
+
+st.markdown(
+    "<div class='small-note'>"
+    "Nesta comparacao, cada linha representa um tratamento ao longo do tempo. "
+    "A linha tracejada indica apenas o tempo selecionado como referencia visual."
+    "</div>",
+    unsafe_allow_html=True,
+)
 
 # -----------------------------
 # Tabela
