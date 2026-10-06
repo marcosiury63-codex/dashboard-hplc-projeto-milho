@@ -207,7 +207,7 @@ def tema_figura(fig, titulo_y=None, valores_y=None, escala_ajustada=False, is_ba
         font=dict(color=TEXT),
         colorway=COLORWAY,
         legend_title_text="",
-        margin=dict(l=20, r=20, t=70, b=25),
+        margin=dict(l=55, r=20, t=70, b=55),
         hovermode="x unified",
         legend=dict(
             orientation="h",
@@ -221,12 +221,16 @@ def tema_figura(fig, titulo_y=None, valores_y=None, escala_ajustada=False, is_ba
         title=dict(font=dict(size=20)),
     )
     fig.update_xaxes(
+        automargin=True,
+        title_standoff=12,
         gridcolor=GRID,
         zerolinecolor=GRID,
         showline=True,
         linecolor="rgba(255,255,255,0.12)",
     )
     fig.update_yaxes(
+        automargin=True,
+        title_standoff=12,
         gridcolor=GRID,
         zerolinecolor=GRID,
         title=titulo_y,
