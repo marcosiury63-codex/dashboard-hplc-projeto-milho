@@ -504,14 +504,14 @@ with col_esq:
         base, "Etanol", "Evolucao do etanol", "Etanol (% v/v)",
         MAPA_SERIES, escala_ajustada,
     )
-    st.plotly_chart(fig_et, use_container_width=True)
+    st.plotly_chart(fig_et, use_container_width=True, theme=None)
 
 with col_dir:
     fig_at = grafico_linha_com_erros(
         base, "Acucares_totais", "Acucares residuais totais", "Acucares totais (g/100 mL)",
         MAPA_SERIES, escala_ajustada,
     )
-    st.plotly_chart(fig_at, use_container_width=True)
+    st.plotly_chart(fig_at, use_container_width=True, theme=None)
 
 # -----------------------------
 # Analitos individuais
@@ -526,7 +526,7 @@ fig_ac = grafico_linha_com_erros(
     base, analito_acucar, f"Evolucao de {analito_acucar}", "Concentracao (g/100 mL)",
     MAPA_SERIES, escala_ajustada, faixa_y=escala_acucares,
 )
-st.plotly_chart(fig_ac, use_container_width=True)
+st.plotly_chart(fig_ac, use_container_width=True, theme=None)
 st.caption("DP4+, DP3, DP2, glicose e frutose compartilham a mesma escala do eixo Y.")
 
 # -----------------------------
@@ -542,7 +542,7 @@ fig_sub = grafico_linha_com_erros(
     base, subproduto, f"Evolucao de {subproduto.replace('_', ' ')}", "Concentracao (g/100 mL)",
     MAPA_SERIES, escala_ajustada,
 )
-st.plotly_chart(fig_sub, use_container_width=True)
+st.plotly_chart(fig_sub, use_container_width=True, theme=None)
 
 # -----------------------------
 # Comparacao temporal entre tratamentos
@@ -602,7 +602,7 @@ fig_comp.add_annotation(
     borderpad=5,
 )
 
-st.plotly_chart(fig_comp, use_container_width=True)
+st.plotly_chart(fig_comp, use_container_width=True, theme=None)
 
 st.markdown(
     "<div class='small-note'>"
