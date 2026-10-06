@@ -6,6 +6,10 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from estatisticas import (
+    ANALITOS, faixa_acucares, preparar_replicas, resumir_leituras, valores_com_erro,
+)
+
 st.set_page_config(
     page_title="Dashboard HPLC - Projeto Milho",
     page_icon="⚙️",
@@ -203,7 +207,7 @@ def tema_figura(fig, titulo_y=None, valores_y=None, escala_ajustada=False, is_ba
         font=dict(color=TEXT),
         colorway=COLORWAY,
         legend_title_text="",
-        margin=dict(l=20, r=20, t=70, b=25),
+        margin=dict(l=55, r=20, t=70, b=55),
         hovermode="x unified",
         legend=dict(
             orientation="h",
@@ -217,12 +221,16 @@ def tema_figura(fig, titulo_y=None, valores_y=None, escala_ajustada=False, is_ba
         title=dict(font=dict(size=20)),
     )
     fig.update_xaxes(
+        automargin=True,
+        title_standoff=12,
         gridcolor=GRID,
         zerolinecolor=GRID,
         showline=True,
         linecolor="rgba(255,255,255,0.12)",
     )
     fig.update_yaxes(
+        automargin=True,
+        title_standoff=12,
         gridcolor=GRID,
         zerolinecolor=GRID,
         title=titulo_y,
@@ -243,6 +251,43 @@ def tema_figura(fig, titulo_y=None, valores_y=None, escala_ajustada=False, is_ba
         if faixa is not None:
             fig.update_yaxes(range=faixa)
 
+    return fig
+
+
+def grafico_linha_com_erros(base, analito, titulo, titulo_y, mapa_cores,
+                           escala_ajustada, faixa_y=None):
+    dados = base.sort_values(["Serie", "Tempo_h"]).copy()
+    dados["Erro relativo (%)"] = dados[f"{analito}_erro_relativo"].map(
+        lambda v: "Indisponivel" if pd.isna(v) else f"{v:.2f}%"
+    )
+    dados["DP entre leituras"] = dados[f"{analito}_dp"].map(
+        lambda v: "Indisponivel" if pd.isna(v) else f"{v:.4f}"
+    )
+    dados["n de leituras"] = dados[f"{analito}_n"]
+    hover = {f"{analito}_dp": False, "DP entre leituras": True,
+             "Erro relativo (%)": True, "n de leituras": True}
+    if analito == "Etanol":
+        dados["Origem do etanol"] = dados["Etanol_origem"]
+        hover["Origem do etanol"] = True
+    fig = px.line(
+        dados,
+        x="Tempo_h",
+        y=analito,
+        error_y=f"{analito}_dp",
+        color="Serie",
+        markers=True,
+        title=titulo,
+        labels={"Tempo_h": "Tempo (h)", analito: titulo_y, "Serie": "Tratamento"},
+        hover_data=hover,
+        color_discrete_map=mapa_cores,
+        color_discrete_sequence=COLORWAY,
+    )
+    tema_figura(fig, titulo_y, valores_y=valores_com_erro(dados, analito),
+                escala_ajustada=escala_ajustada)
+    fig.update_traces(error_y=dict(visible=True, thickness=1.5, width=4))
+    fig.update_xaxes(tickmode="array", tickvals=sorted(dados["Tempo_h"].unique()))
+    if faixa_y is not None:
+        fig.update_yaxes(range=faixa_y, autorange=False)
     return fig
 
 
@@ -365,7 +410,8 @@ escala_ajustada = st.sidebar.toggle(
     value=True,
     help=(
         "Fecha automaticamente a faixa do eixo Y dos graficos de linha para destacar "
-        "melhor as curvas de crescimento e queda. O grafico de barras continua partindo de zero."
+        "as curvas e suas barras de erro. Os carboidratos individuais usam sempre "
+        "a mesma escala do DP4+, com origem em zero."
     ),
 )
 
@@ -408,6 +454,7 @@ c4.metric(
 st.markdown(
     "<div class='small-note'>"
     "Observacao: no arquivo original, <b>n.a.</b> indica nao detectado e e tratado como ausente, nao como zero. "
+    "Excecao: o etanol em 0 h e representado por zero assumido, com erro zero, sem medicao experimental. "
     "Para 0 h, os dados do tratamento 30% TMSC sao compartilhados com 30% FT-858 + CAT-1, e os de 42% TMSC "
     "sao compartilhados com 42% FT-858 + CAT-1, conforme a equivalencia experimental informada."
     "</div>",
@@ -417,15 +464,13 @@ st.markdown(
 # -----------------------------
 # Preparacao para graficos
 # -----------------------------
+resumo = resumir_leituras(filtrado, incluir_zero_etanol=0 in tempos)
+resumo["Serie"] = resumo["Grupo"].astype(int).map(NOMES_GRUPOS)
 if modo == "Media por tratamento":
-    numericas = [
-        "DP4+", "DP3", "DP2", "Glicose", "Frutose",
-        "Acido_latico", "Glicerol", "Acido_acetico", "Etanol", "Acucares_totais",
-    ]
-    base = filtrado.groupby(["Grupo", "Tempo_h"], as_index=False)[numericas].mean()
-    base["Serie"] = base["Grupo"].astype(int).map(NOMES_GRUPOS)
+    base = resumo.copy()
 else:
-    base = filtrado.copy()
+    base = preparar_replicas(filtrado, resumo, incluir_zero_etanol=0 in tempos)
+    base["Tratamento"] = base["Grupo"].astype(int).map(NOMES_GRUPOS)
     base["Serie"] = base["Tratamento"] + " | rep. " + base["Replica"].astype(str)
 
 # Mapa de cores dinamico para manter identidade visual tambem nas replicas.
@@ -438,7 +483,18 @@ else:
     for _, linha in base[["Serie", "Tratamento"]].drop_duplicates().iterrows():
         MAPA_SERIES[linha["Serie"]] = CORES_TRATAMENTOS.get(linha["Tratamento"], ACCENT)
 
-ticks_tempo = sorted(base["Tempo_h"].dropna().astype(int).unique().tolist())
+escala_acucares = faixa_acucares(base)
+st.caption(
+    "Barras de erro: ± desvio padrao amostral das leituras do tratamento em cada tempo. "
+    "Erro relativo (%) = 100 × DP / |media|; disponivel ao passar o mouse em cada ponto. "
+    "n indica as leituras validas (geralmente 3; em 0 h, 2 para os acucares). "
+    "Com menos de 2 leituras, o DP e indisponivel."
+)
+if modo == "Replicas individuais":
+    st.caption(
+        "Nas curvas individuais, as barras e o erro relativo representam a dispersao "
+        "do tratamento/tempo, calculada com todas as leituras disponiveis."
+    )
 
 # -----------------------------
 # Etanol e acucares
@@ -448,36 +504,18 @@ st.subheader("1. Evolucao da fermentacao")
 col_esq, col_dir = st.columns(2)
 
 with col_esq:
-    fig_et = px.line(
-        base,
-        x="Tempo_h",
-        y="Etanol",
-        color="Serie",
-        markers=True,
-        title="Evolucao do etanol",
-        labels={"Tempo_h": "Tempo (h)", "Etanol": "Etanol (% v/v)", "Serie": "Tratamento"},
-        color_discrete_map=MAPA_SERIES,
-        color_discrete_sequence=COLORWAY,
+    fig_et = grafico_linha_com_erros(
+        base, "Etanol", "Evolucao do etanol", "Etanol (% v/v)",
+        MAPA_SERIES, escala_ajustada,
     )
-    tema_figura(fig_et, "Etanol (% v/v)", valores_y=base["Etanol"], escala_ajustada=escala_ajustada)
-    fig_et.update_xaxes(tickmode="array", tickvals=ticks_tempo)
-    st.plotly_chart(fig_et, use_container_width=True)
+    st.plotly_chart(fig_et, use_container_width=True, theme=None)
 
 with col_dir:
-    fig_at = px.line(
-        base,
-        x="Tempo_h",
-        y="Acucares_totais",
-        color="Serie",
-        markers=True,
-        title="Acucares residuais totais",
-        labels={"Tempo_h": "Tempo (h)", "Acucares_totais": "g/100 mL", "Serie": "Tratamento"},
-        color_discrete_map=MAPA_SERIES,
-        color_discrete_sequence=COLORWAY,
+    fig_at = grafico_linha_com_erros(
+        base, "Acucares_totais", "Acucares residuais totais", "Acucares totais (g/100 mL)",
+        MAPA_SERIES, escala_ajustada,
     )
-    tema_figura(fig_at, "Acucares totais (g/100 mL)", valores_y=base["Acucares_totais"], escala_ajustada=escala_ajustada)
-    fig_at.update_xaxes(tickmode="array", tickvals=ticks_tempo)
-    st.plotly_chart(fig_at, use_container_width=True)
+    st.plotly_chart(fig_at, use_container_width=True, theme=None)
 
 # -----------------------------
 # Analitos individuais
@@ -488,20 +526,12 @@ analito_acucar = st.selectbox(
     "Selecione o carboidrato para comparar",
     ["Glicose", "DP2", "DP3", "DP4+", "Frutose"],
 )
-fig_ac = px.line(
-    base,
-    x="Tempo_h",
-    y=analito_acucar,
-    color="Serie",
-    markers=True,
-    title=f"Evolucao de {analito_acucar}",
-    labels={"Tempo_h": "Tempo (h)", analito_acucar: "Concentracao (g/100 mL)", "Serie": "Tratamento"},
-    color_discrete_map=MAPA_SERIES,
-    color_discrete_sequence=COLORWAY,
+fig_ac = grafico_linha_com_erros(
+    base, analito_acucar, f"Evolucao de {analito_acucar}", "Concentracao (g/100 mL)",
+    MAPA_SERIES, escala_ajustada, faixa_y=escala_acucares,
 )
-tema_figura(fig_ac, "Concentracao (g/100 mL)", valores_y=base[analito_acucar], escala_ajustada=escala_ajustada)
-fig_ac.update_xaxes(tickmode="array", tickvals=ticks_tempo)
-st.plotly_chart(fig_ac, use_container_width=True)
+st.plotly_chart(fig_ac, use_container_width=True, theme=None)
+st.caption("DP4+, DP3, DP2, glicose e frutose compartilham a mesma escala do eixo Y.")
 
 # -----------------------------
 # Subprodutos
@@ -512,20 +542,11 @@ subproduto = st.selectbox(
     "Selecione o composto",
     ["Glicerol", "Acido_latico", "Acido_acetico"],
 )
-fig_sub = px.line(
-    base,
-    x="Tempo_h",
-    y=subproduto,
-    color="Serie",
-    markers=True,
-    title=f"Evolucao de {subproduto.replace('_', ' ')}",
-    labels={"Tempo_h": "Tempo (h)", subproduto: "Concentracao (g/100 mL)", "Serie": "Tratamento"},
-    color_discrete_map=MAPA_SERIES,
-    color_discrete_sequence=COLORWAY,
+fig_sub = grafico_linha_com_erros(
+    base, subproduto, f"Evolucao de {subproduto.replace('_', ' ')}", "Concentracao (g/100 mL)",
+    MAPA_SERIES, escala_ajustada,
 )
-tema_figura(fig_sub, "Concentracao (g/100 mL)", valores_y=base[subproduto], escala_ajustada=escala_ajustada)
-fig_sub.update_xaxes(tickmode="array", tickvals=ticks_tempo)
-st.plotly_chart(fig_sub, use_container_width=True)
+st.plotly_chart(fig_sub, use_container_width=True, theme=None)
 
 # -----------------------------
 # Comparacao temporal entre tratamentos
@@ -559,38 +580,10 @@ with col_tempo:
 
 coluna_metrica, titulo_y_comparacao = metricas_comparacao[metrica_escolhida]
 
-comp_temporal = (
-    filtrado
-    .groupby(["Grupo", "Tempo_h"], as_index=False)[coluna_metrica]
-    .mean()
-)
-comp_temporal["Tratamento"] = comp_temporal["Grupo"].astype(int).map(NOMES_GRUPOS)
-
-fig_comp = px.line(
-    comp_temporal,
-    x="Tempo_h",
-    y=coluna_metrica,
-    color="Tratamento",
-    markers=True,
-    title=f"{metrica_escolhida}: comparacao da evolucao entre tratamentos",
-    labels={
-        "Tempo_h": "Tempo de fermentacao (h)",
-        coluna_metrica: titulo_y_comparacao,
-        "Tratamento": "Tratamento",
-    },
-    color_discrete_map=CORES_TRATAMENTOS,
-    color_discrete_sequence=COLORWAY,
-)
-
-tema_figura(
-    fig_comp,
-    titulo_y_comparacao,
-    valores_y=comp_temporal[coluna_metrica],
-    escala_ajustada=escala_ajustada,
-)
-fig_comp.update_xaxes(
-    tickmode="array",
-    tickvals=sorted(comp_temporal["Tempo_h"].dropna().astype(int).unique().tolist()),
+fig_comp = grafico_linha_com_erros(
+    resumo, coluna_metrica, f"{metrica_escolhida}: comparacao da evolucao entre tratamentos",
+    titulo_y_comparacao, CORES_TRATAMENTOS, escala_ajustada,
+    faixa_y=escala_acucares if coluna_metrica == "Glicose" else None,
 )
 
 # Linha vertical para manter a leitura de um tempo de referencia sem perder a curva completa.
@@ -613,7 +606,7 @@ fig_comp.add_annotation(
     borderpad=5,
 )
 
-st.plotly_chart(fig_comp, use_container_width=True)
+st.plotly_chart(fig_comp, use_container_width=True, theme=None)
 
 st.markdown(
     "<div class='small-note'>"
@@ -647,6 +640,29 @@ st.download_button(
     mime="text/csv",
 )
 
+with st.expander("Medias, barras de erro e erro relativo"):
+    tabela_erros = resumo.melt(
+        id_vars=["Grupo", "Tempo_h", "Serie"], value_vars=ANALITOS,
+        var_name="Analito", value_name="Media",
+    )
+    for sufixo, titulo in [("_dp", "Desvio padrao"), ("_erro_relativo", "Erro relativo (%)"),
+                          ("_n", "n de leituras")]:
+        valores = resumo.melt(
+            id_vars=["Grupo", "Tempo_h"], value_vars=[f"{a}{sufixo}" for a in ANALITOS],
+            var_name="Analito", value_name=titulo,
+        )
+        valores["Analito"] = valores["Analito"].str.removesuffix(sufixo)
+        tabela_erros = tabela_erros.merge(valores, on=["Grupo", "Tempo_h", "Analito"])
+    tabela_erros["Origem"] = "Leituras HPLC"
+    assumidos = tabela_erros["Analito"].eq("Etanol") & tabela_erros["Tempo_h"].eq(0) & tabela_erros["n de leituras"].eq(0)
+    tabela_erros.loc[assumidos, "Origem"] = "Zero assumido (sem medicao experimental)"
+    tabela_erros = tabela_erros.rename(columns={"Serie": "Tratamento"})
+    st.dataframe(tabela_erros, use_container_width=True, hide_index=True)
+    st.download_button(
+        "Baixar estatisticas em CSV", tabela_erros.to_csv(index=False).encode("utf-8-sig"),
+        file_name="hplc_estatisticas.csv", mime="text/csv",
+    )
+
 with st.expander("Observacoes sobre a base de dados"):
     st.write(
         "Os registros originais de 0 h existem para os grupos 1 e 3. Para representar corretamente "
@@ -655,6 +671,14 @@ with st.expander("Observacoes sobre a base de dados"):
         "dados compartilhados na tabela detalhada; o arquivo Excel original nao e alterado pelo dashboard."
     )
     st.write(
-        "A opcao 'Escala Y mais detalhada' ajusta apenas os graficos de linha. O grafico de barras "
-        "continua com origem em zero para preservar uma comparacao visual adequada entre tratamentos."
+        "O etanol em 0 h e zero assumido apenas nos graficos e no resumo estatistico, com DP e erro relativo "
+        "iguais a zero e n=0. As leituras originais permanecem ausentes na tabela detalhada. "
+        "O erro relativo usa o DP amostral dividido pelo modulo da media, vezes 100. "
+        "Quando a media e zero ou ha menos de duas leituras, o erro relativo e indisponivel, "
+        "exceto para o zero assumido de etanol."
+    )
+    st.write(
+        "Os carboidratos individuais compartilham a faixa do DP4+, incluindo suas barras de erro e zero. "
+        "Se outro carboidrato exceder essa faixa em um recorte dos filtros, a escala comum e ampliada "
+        "para manter todos os pontos e barras visiveis."
     )
