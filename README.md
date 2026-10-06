@@ -23,5 +23,11 @@ para todos os açúcares se outro carboidrato a ultrapassar após os filtros.
 Nas curvas de réplicas individuais, as barras e o erro relativo indicam a
 dispersão do tratamento/tempo, e não uma estimativa separada por réplica.
 
+Ao passar o mouse, a descrição mostra apenas o ponto mais próximo, com fundo
+escuro, média e DP com quatro casas decimais e erro relativo com duas casas.
+A legenda fica abaixo do gráfico e se ajusta à largura disponível. No modo
+de réplicas, cada tratamento aparece uma vez na legenda, e o nome da réplica
+continua na descrição do ponto.
+
 Para validar os cálculos e as interações do dashboard:
 `pip install pytest` e `python -m pytest -q`.

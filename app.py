@@ -207,22 +207,32 @@ def tema_figura(fig, titulo_y=None, valores_y=None, escala_ajustada=False, is_ba
         font=dict(color=TEXT),
         colorway=COLORWAY,
         legend_title_text="",
-        margin=dict(l=55, r=20, t=70, b=55),
-        hovermode="x unified",
+        height=500,
+        margin=dict(l=75, r=30, t=65, b=110),
+        hovermode="closest",
+        hoverlabel=dict(
+            bgcolor=CARD,
+            bordercolor=MUTED,
+            font=dict(color=TEXT, size=13),
+            align="left",
+        ),
         legend=dict(
             orientation="h",
-            yanchor="bottom",
-            y=1.02,
+            yanchor="top",
+            y=-0.23,
             xanchor="left",
             x=0,
             font=dict(size=11),
             bgcolor="rgba(0,0,0,0)"
         ),
-        title=dict(font=dict(size=20)),
+        title=dict(
+            font=dict(size=20), x=0, xanchor="left", xref="paper",
+            y=0.98, yanchor="top", yref="container", pad=dict(t=6),
+        ),
     )
     fig.update_xaxes(
         automargin=True,
-        title_standoff=12,
+        title_standoff=16,
         gridcolor=GRID,
         zerolinecolor=GRID,
         showline=True,
@@ -230,7 +240,7 @@ def tema_figura(fig, titulo_y=None, valores_y=None, escala_ajustada=False, is_ba
     )
     fig.update_yaxes(
         automargin=True,
-        title_standoff=12,
+        title_standoff=18,
         gridcolor=GRID,
         zerolinecolor=GRID,
         title=titulo_y,
@@ -257,18 +267,37 @@ def tema_figura(fig, titulo_y=None, valores_y=None, escala_ajustada=False, is_ba
 def grafico_linha_com_erros(base, analito, titulo, titulo_y, mapa_cores,
                            escala_ajustada, faixa_y=None):
     dados = base.sort_values(["Serie", "Tempo_h"]).copy()
-    dados["Erro relativo (%)"] = dados[f"{analito}_erro_relativo"].map(
-        lambda v: "Indisponivel" if pd.isna(v) else f"{v:.2f}%"
+
+    def formatar_numero(valor, casas=4):
+        return "indisponível" if pd.isna(valor) else f"{valor:.{casas}f}".replace(".", ",")
+
+    unidade = "% v/v" if analito == "Etanol" else "g/100 mL"
+    dados["Valor_formatado"] = dados[analito].map(formatar_numero)
+    dados["DP_formatado"] = dados[f"{analito}_dp"].map(formatar_numero)
+    dados["Erro_formatado"] = dados[f"{analito}_erro_relativo"].map(
+        lambda v: "indisponível" if pd.isna(v) else f"{formatar_numero(v, 2)}%"
     )
-    dados["DP entre leituras"] = dados[f"{analito}_dp"].map(
-        lambda v: "Indisponivel" if pd.isna(v) else f"{v:.4f}"
-    )
-    dados["n de leituras"] = dados[f"{analito}_n"]
-    hover = {f"{analito}_dp": False, "DP entre leituras": True,
-             "Erro relativo (%)": True, "n de leituras": True}
+    dados["Nota_ponto"] = ""
     if analito == "Etanol":
-        dados["Origem do etanol"] = dados["Etanol_origem"]
-        hover["Origem do etanol"] = True
+        assumido = dados["Tempo_h"].eq(0) & dados["Etanol_n"].eq(0)
+        dados.loc[assumido, "Nota_ponto"] = "<br><i>Zero assumido; sem medição experimental.</i>"
+
+    if "Replica" in dados:
+        texto_valor = (
+            f"Valor da réplica: %{{customdata[1]}} {unidade}<br>"
+            f"DP do tratamento: %{{customdata[2]}} {unidade}<br>"
+            "Erro relativo do tratamento: %{customdata[3]}<br>"
+        )
+    else:
+        texto_valor = (
+            f"Média ± DP: %{{customdata[1]}} ± %{{customdata[2]}} {unidade}<br>"
+            "Erro relativo: %{customdata[3]}<br>"
+        )
+    descricao_ponto = (
+        "<b>%{customdata[0]}</b><br>Tempo: %{x:.0f} h<br>"
+        + texto_valor
+        + "Leituras válidas: %{customdata[4]}%{customdata[5]}<extra></extra>"
+    )
     fig = px.line(
         dados,
         x="Tempo_h",
@@ -278,16 +307,36 @@ def grafico_linha_com_erros(base, analito, titulo, titulo_y, mapa_cores,
         markers=True,
         title=titulo,
         labels={"Tempo_h": "Tempo (h)", analito: titulo_y, "Serie": "Tratamento"},
-        hover_data=hover,
+        custom_data=["Serie", "Valor_formatado", "DP_formatado", "Erro_formatado",
+                     f"{analito}_n", "Nota_ponto"],
         color_discrete_map=mapa_cores,
         color_discrete_sequence=COLORWAY,
     )
     tema_figura(fig, titulo_y, valores_y=valores_com_erro(dados, analito),
                 escala_ajustada=escala_ajustada)
-    fig.update_traces(error_y=dict(visible=True, thickness=1.5, width=4))
-    fig.update_xaxes(tickmode="array", tickvals=sorted(dados["Tempo_h"].unique()))
+    fig.update_traces(
+        error_y=dict(visible=True, thickness=1.5, width=4),
+        hovertemplate=descricao_ponto,
+    )
+    if "Replica" in dados:
+        tratamentos_na_legenda = set()
+        for curva in fig.data:
+            tratamento = curva.name.split(" | rep. ")[0]
+            curva.update(
+                legendgroup=tratamento, name=tratamento,
+                showlegend=tratamento not in tratamentos_na_legenda,
+            )
+            tratamentos_na_legenda.add(tratamento)
+    ticks = sorted(dados["Tempo_h"].unique())
+    folga_x = max(float(ticks[-1] - ticks[0]), 24.0) * 0.03
+    fig.update_xaxes(tickmode="array", tickvals=ticks, range=[ticks[0] - folga_x, ticks[-1] + folga_x])
     if faixa_y is not None:
         fig.update_yaxes(range=faixa_y, autorange=False)
+    elif analito == "Etanol" and escala_ajustada:
+        faixa = fig.layout.yaxis.range
+        if faixa is not None and faixa[0] == 0:
+            # Folga de desenho para o marcador de 0 h aparecer inteiro.
+            fig.update_yaxes(range=[-0.03 * (faixa[1] - faixa[0]), faixa[1]])
     return fig
 
 

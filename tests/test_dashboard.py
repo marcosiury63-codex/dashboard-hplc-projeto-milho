@@ -24,9 +24,14 @@ def test_graficos_estatisticas_filtros_e_replicas():
     charts = figuras(app)
     assert len(charts) == 5
     for chart in charts:
+        assert chart["layout"]["hovermode"] == "closest"
+        assert chart["layout"]["hoverlabel"]["bgcolor"] == "#17171d"
+        assert chart["layout"]["hoverlabel"]["font"]["color"] == "#f5f5f7"
         for serie in chart["data"]:
             assert serie["error_y"]["visible"]
-            assert "Erro relativo (%)" in serie["hovertemplate"]
+            assert "Erro relativo:" in serie["hovertemplate"]
+            assert "Média ± DP:" in serie["hovertemplate"]
+            assert serie["hovertemplate"].endswith("<extra></extra>")
     for serie in charts[0]["data"]:
         assert array_plotly(serie["x"])[0] == array_plotly(serie["y"])[0] == 0
         assert array_plotly(serie["error_y"]["array"])[0] == 0
